@@ -1,78 +1,108 @@
-# Paper Summary Agent
+# Paper Summary Agent for Obsidian
 
-`paper-summary-agent` is a local skill folder for Codex-style agent runtimes, including Codex and OpenClaw setups that load skills from a directory on disk.
+`paper-summary-agent` is a local skill package for Codex-style runtimes. It is designed to fetch papers, analyze them, and save the final Korean Markdown output inside an Obsidian vault so the note and extracted figure assets work with relative links.
 
-The main purpose of this repository is simple:
+This repository is a skill package, not a standalone app. The main entry point is [`SKILL.md`](./SKILL.md), and the helper scripts under [`scripts/`](./scripts/) support fetching, text extraction, PDF figure extraction, and final Markdown writing.
 
-- register the skill under your local `skills` directory
-- let the runtime discover `SKILL.md`
-- run the skill by giving the agent a paper title, DOI, paper URL, or PDF URL
+## What This Repository Does
 
-## Quick Start
+- resolves a paper from title, DOI, URL, or direct PDF URL
+- fetches source files and extracts text
+- analyzes methods, experiments, figures, and tables
+- writes a Korean Markdown summary into an Obsidian-friendly folder
+- stores extracted figure assets next to the Markdown note with relative paths
 
-1. Put this folder under your runtime's local `skills` directory.
-2. Make sure the folder name stays `paper-summary-agent`.
-3. Install the Python dependencies used by the helper scripts.
-4. Restart or reload the agent runtime if it caches the available skills.
-5. Invoke the agent with a paper input or explicitly mention `paper-summary-agent`.
+## Install The Skill
 
-## Repository Role
+Place this folder under the local skills directory that your runtime scans and keep the folder name as `paper-summary-agent`.
 
-This repository is a skill package, not a standalone app.
-
-The important files are:
-
-- [`SKILL.md`](./SKILL.md): the runtime-facing instructions
-- [`resources/agents_append.md`](./resources/agents_append.md): extra prompt content used by the workflow
-- [`scripts/`](./scripts/): helper scripts for fetching papers, extracting text, extracting figures, and saving summaries
-
-## Registering The Skill
-
-### Codex
-
-Clone or copy this repository into the Codex skills directory:
-
-```bash
-git clone https://github.com/ch040602/Skills_Paper-summary.git ~/.codex/skills/paper-summary-agent
-```
-
-If the folder already exists, update it with:
-
-```bash
-git -C ~/.codex/skills/paper-summary-agent pull
-```
-
-Codex should then be able to discover the skill from:
+Typical layout:
 
 ```text
-~/.codex/skills/paper-summary-agent/SKILL.md
+<skills-root>/paper-summary-agent/
 ```
 
-If Codex was already running, start a new session or reload the environment so the updated skill list is picked up.
+For Codex, `<skills-root>` is commonly `~/.codex/skills`. For other runtimes such as OpenClaw, use that runtime's local skills directory.
 
-### OpenClaw
+If you want to clone it directly:
 
-Copy or clone the same folder into the skills directory that your OpenClaw deployment scans for local skills.
-
-Example pattern:
-
-```text
-<your-openclaw-skills-root>/paper-summary-agent/
+```bash
+git clone https://github.com/ch040602/Skills_Paper-summary.git <skills-root>/paper-summary-agent
 ```
 
-Required files that must remain together:
+If the skill is already installed:
 
-- `SKILL.md`
-- `resources/agents_append.md`
-- `scripts/*.py`
+```bash
+git -C <skills-root>/paper-summary-agent pull
+```
 
-If your OpenClaw setup watches skills only at startup, restart or reload that process after copying the folder.
+Restart or reload the runtime if it caches the available skills.
 
-## Executing The Skill
+## Install Python Dependencies
 
-Once the folder is registered, execute it through the agent runtime rather than by launching this repository directly.
+Install the helper-script dependencies before running the skill:
 
-Typical triggers are:
+```bash
+pip install requests beautifulsoup4 lxml pypdf python-slugify pymupdf pillow
+```
+
+PDF-related packages:
+
+- `pypdf`: PDF text extraction
+- `pymupdf`: figure and table extraction from PDFs
+- `pillow`: image post-processing for extracted figures
+
+HTML-related packages:
+
+- `requests`: fetching paper pages and PDFs
+- `beautifulsoup4` and `lxml`: HTML parsing
+
+## Configure Download And Obsidian Summary Paths
+
+Path configuration lives in [`scripts/paths.py`](./scripts/paths.py). The helper scripts support these environment variables:
+
+- `PAPER_SUMMARY_AGENT_BASE_DIR`
+- `PAPER_SUMMARY_AGENT_DOWNLOAD_DIR`
+- `PAPER_SUMMARY_AGENT_SUMMARY_DIR`
+
+If `PAPER_SUMMARY_AGENT_DOWNLOAD_DIR` or `PAPER_SUMMARY_AGENT_SUMMARY_DIR` is set with a relative path, it is resolved relative to this repository root. That keeps configuration portable and avoids hard-coding user-specific absolute paths.
+
+Defaults:
+
+- downloaded source files: `~/Documents/paper-summary-agent/downloaded/`
+- final Markdown notes for Obsidian: `~/Desktop/obsidian/summary_paper/`
+
+Recommended setup for Obsidian:
+
+- point `PAPER_SUMMARY_AGENT_SUMMARY_DIR` to a folder inside your Obsidian vault
+- keep the summary Markdown file and extracted figure asset folder under the same parent so image links stay relative
+
+PowerShell example:
+
+```powershell
+$env:PAPER_SUMMARY_AGENT_DOWNLOAD_DIR = "./data/downloaded"
+$env:PAPER_SUMMARY_AGENT_SUMMARY_DIR = "../my-obsidian-vault/summary_paper"
+```
+
+Bash example:
+
+```bash
+export PAPER_SUMMARY_AGENT_DOWNLOAD_DIR=./data/downloaded
+export PAPER_SUMMARY_AGENT_SUMMARY_DIR=../my-obsidian-vault/summary_paper
+```
+
+With that setup, the skill will write:
+
+- `../my-obsidian-vault/summary_paper/YYYYMMDD_<slugified_title>.md`
+- `../my-obsidian-vault/summary_paper/<slugified_title>/figure_*.png`
+
+The Markdown generated by [`scripts/save_summary.py`](./scripts/save_summary.py) embeds figures with relative paths, which is the intended behavior for Obsidian.
+
+## Execute The Skill
+
+Once the folder is registered, run it through the agent runtime rather than launching this repository directly.
+
+Typical triggers:
 
 - a paper title
 - a DOI
@@ -93,67 +123,37 @@ Read this arXiv paper: https://arxiv.org/pdf/1706.03762.pdf
 Use paper-summary-agent on DOI 10.48550/arXiv.1706.03762
 ```
 
-The skill instructions in [`SKILL.md`](./SKILL.md) tell the runtime to:
+The skill instructions in [`SKILL.md`](./SKILL.md) tell the runtime to resolve the source, fetch files, analyze the paper, and save a Korean Markdown report.
 
-- resolve the paper identity
-- fetch source files
-- extract text
-- analyze methods and experiments
-- save a Korean Markdown report
+## Runtime Outputs
 
-## Output Locations
+During execution, the helper scripts usually create:
 
-During execution, the helper scripts write artifacts to:
+- downloaded source files under the configured download directory
+- a final Markdown note under the configured Obsidian summary directory
+- an asset folder named after the paper slug beside that note when PDF figures are extracted
 
-- `~/Documents/paper-summary-agent/downloaded/`
-- `~/Documents/paper-summary-agent/summary/`
+Because the note and asset folder are siblings, the generated image links remain relative and portable across machines as long as the vault structure stays the same.
 
-These paths are defined in [`scripts/paths.py`](./scripts/paths.py).
+## Repository Layout
 
-## Python Dependencies
+Important files:
 
-Install the helper-script dependencies before running the skill:
-
-```bash
-pip install requests beautifulsoup4 lxml pypdf python-slugify pymupdf pillow
-```
-
-These packages are needed for:
-
-- downloading paper pages and PDFs
-- extracting text from HTML and PDF
-- extracting figures from PDFs
-- saving the final Markdown summary
-
-## What Happens At Runtime
-
-The usual execution flow is:
-
-1. the runtime loads `SKILL.md`
-2. the user provides a paper-related request
-3. the runtime activates `paper-summary-agent`
-4. helper scripts under `scripts/` are called as needed
-5. the final summary is saved under `~/Documents/paper-summary-agent/summary/`
-
-## Helper Scripts
-
-The repository includes these helpers:
-
-- `scripts/resolve_paper.py`: classifies input as title, DOI, URL, or PDF URL
-- `scripts/fetch_paper.py`: downloads the source page or PDF
-- `scripts/extract_text.py`: extracts text from downloaded HTML or PDF
-- `scripts/normalize_text.py`: cleans extracted text
-- `scripts/extract_figures.py`: extracts PDF figures
-- `scripts/save_summary.py`: writes the final Markdown summary and embeds figures when available
-
-These are support utilities. The actual skill behavior is defined by `SKILL.md`.
+- [`SKILL.md`](./SKILL.md): runtime-facing workflow instructions
+- [`resources/agents_append.md`](./resources/agents_append.md): extra prompt content used by the workflow
+- [`scripts/resolve_paper.py`](./scripts/resolve_paper.py): classifies input as title, DOI, URL, or PDF URL
+- [`scripts/fetch_paper.py`](./scripts/fetch_paper.py): downloads the source page or PDF
+- [`scripts/extract_text.py`](./scripts/extract_text.py): extracts text from downloaded HTML or PDF
+- [`scripts/normalize_text.py`](./scripts/normalize_text.py): cleans extracted text
+- [`scripts/extract_figures.py`](./scripts/extract_figures.py): extracts PDF figures
+- [`scripts/save_summary.py`](./scripts/save_summary.py): writes the final Markdown summary and embeds figures when available
 
 ## Updating The Skill
 
 If you already installed the repository as a local skill, update it in place:
 
 ```bash
-git -C ~/.codex/skills/paper-summary-agent pull
+git -C <skills-root>/paper-summary-agent pull
 ```
 
 Then restart or reload your runtime if skill definitions are cached.

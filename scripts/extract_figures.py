@@ -6,7 +6,7 @@ import fitz
 from PIL import Image, ImageOps
 
 
-CAPTION_RE = re.compile(r"^Fig\.\s*(\d+)\.\s*(.+)$", re.IGNORECASE)
+CAPTION_RE = re.compile(r"^(?:Fig(?:ure)?\.?)\s*(\d+)\s*[:.]\s*(.+)$", re.IGNORECASE)
 PAGE_MARGIN = 20.0
 TRACK_TOP_MARGIN = 40.0
 TRACK_GUTTER = 8.0
@@ -36,6 +36,14 @@ def caption_track(bbox: fitz.Rect, page_width: float) -> str:
     if bbox.x0 >= mid - 20.0:
         return "right"
     return "full"
+
+
+def track_bounds(page_rect: fitz.Rect, track_name: str):
+    if track_name == "left":
+        return PAGE_MARGIN, (page_rect.width / 2.0) - TRACK_GUTTER
+    if track_name == "right":
+        return (page_rect.width / 2.0) + TRACK_GUTTER, page_rect.width - PAGE_MARGIN
+    return PAGE_MARGIN, page_rect.width - PAGE_MARGIN
 
 
 def expand_rect(rect: fitz.Rect, padding: float, bounds: fitz.Rect) -> fitz.Rect:
@@ -157,6 +165,41 @@ def select_figure_rect(groups, caption_bbox: fitz.Rect, search_rect: fitz.Rect):
     return expand_rect(combined, CLIP_PADDING, search_rect)
 
 
+def crosses_midline(rect: fitz.Rect, page_width: float) -> bool:
+    mid = page_width / 2.0
+    return rect.x0 < mid - TRACK_GUTTER and rect.x1 > mid + TRACK_GUTTER
+
+
+def touches_midline_boundary(rect: fitz.Rect, page_width: float, tolerance: float = 28.0) -> bool:
+    mid = page_width / 2.0
+    left_boundary = mid - TRACK_GUTTER
+    right_boundary = mid + TRACK_GUTTER
+    return (
+        abs(rect.x1 - left_boundary) <= tolerance
+        or abs(rect.x0 - right_boundary) <= tolerance
+        or crosses_midline(rect, page_width)
+    )
+
+
+def prefer_full_width(local_rect, full_rect, page_width: float) -> bool:
+    if full_rect is None:
+        return False
+    if local_rect is None:
+        return True
+    if not touches_midline_boundary(local_rect, page_width):
+        return False
+
+    local_area = rect_area(local_rect)
+    full_area = rect_area(full_rect)
+    if full_area <= local_area:
+        return False
+
+    if crosses_midline(full_rect, page_width) and full_area >= (local_area * 1.2):
+        return True
+
+    return full_area >= (local_area * 1.6)
+
+
 def trim_whitespace(image: Image.Image) -> Image.Image:
     image = image.convert("RGB")
     grayscale = ImageOps.grayscale(image)
@@ -199,17 +242,9 @@ def extract_figures(pdf_path: str, output_dir: str):
         for track_name in ("left", "right", "full"):
             track_captions = [caption for caption in captions if caption["track"] == track_name]
             track_captions.sort(key=lambda item: item["bbox"].y0)
-            if track_name == "left":
-                search_x0 = PAGE_MARGIN
-                search_x1 = (page.rect.width / 2.0) - TRACK_GUTTER
-            elif track_name == "right":
-                search_x0 = (page.rect.width / 2.0) + TRACK_GUTTER
-                search_x1 = page.rect.width - PAGE_MARGIN
-            else:
-                search_x0 = PAGE_MARGIN
-                search_x1 = page.rect.width - PAGE_MARGIN
 
             for caption in track_captions:
+                search_x0, search_x1 = track_bounds(page.rect, track_name)
                 search_rect = fitz.Rect(search_x0, tracks[track_name], search_x1, caption["bbox"].y0 - CAPTION_GAP)
                 tracks[track_name] = caption["bbox"].y1 + CAPTION_GAP
                 if search_rect.is_empty or search_rect.height <= 1.0:
@@ -224,6 +259,25 @@ def extract_figures(pdf_path: str, output_dir: str):
 
                 groups = merge_rects(candidate_rects, CLUSTER_GAP)
                 figure_rect = select_figure_rect(groups, caption["bbox"], search_rect)
+                if track_name != "full":
+                    full_x0, full_x1 = track_bounds(page.rect, "full")
+                    full_search_rect = fitz.Rect(
+                        full_x0,
+                        tracks["full"],
+                        full_x1,
+                        caption["bbox"].y0 - CAPTION_GAP,
+                    )
+                    full_candidate_rects = []
+                    if not full_search_rect.is_empty and full_search_rect.height > 1.0:
+                        for graphic in graphics:
+                            clipped = graphic & full_search_rect
+                            if clipped.is_empty or rect_area(clipped) < MIN_RECT_AREA:
+                                continue
+                            full_candidate_rects.append(clipped)
+                    full_groups = merge_rects(full_candidate_rects, CLUSTER_GAP)
+                    full_rect = select_figure_rect(full_groups, caption["bbox"], full_search_rect)
+                    if prefer_full_width(figure_rect, full_rect, page.rect.width):
+                        figure_rect = full_rect
                 if figure_rect is None:
                     continue
 
