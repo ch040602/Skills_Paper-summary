@@ -5,6 +5,7 @@ from pathlib import Path
 
 from slugify import slugify
 
+from asset_cache import load_or_extract_pdf_assets
 from extract_figures import extract_figures
 from extract_tables import extract_tables
 from paths import SUMMARY_DIR
@@ -480,6 +481,7 @@ def build_inline_figure_block(asset_dir_name: str, figures, heading_level: int) 
         lines.append(f"**Figure {figure['number']}**")
         lines.append("")
         lines.append(f"![Figure {figure['number']}]({rel_path})")
+        lines.append("")
         lines.append(figure.get("note") or "Korean figure explanation required.")
         lines.append("")
     lines.append("<!-- paper-summary-agent:figures:end -->")
@@ -541,7 +543,6 @@ def inject_figures_into_sections(content: str, asset_dir_name: str, figures, fig
                 {
                     "number": figure["number"],
                     "target_label": INLINE_FIGURE_TARGETS[target_key]["label"],
-                    "note": figure.get("note", "") or normalize_note_text(figure.get("caption", "")),
                 }
             )
 
@@ -575,16 +576,13 @@ def inject_tables_into_sections(content: str, tables, table_notes_map):
     return content, placements
 
 
-def build_section_8_index(placements, leftovers, table_placements, table_notes: str) -> str:
+def build_section_8_index(placements, leftovers, table_placements, table_notes: str, asset_dir_name: str | None = None) -> str:
     lines = ["## 8. Figure / table notes", ""]
 
     if placements:
-        lines.extend(["### Figure placement", ""])
+        lines.extend(["### Figure index", ""])
         for placement in placements:
-            note = placement["note"] or "See the inline figure explanation in the linked section."
-            lines.append(
-                f"- `Fig. {placement['number']}` -> `{placement['target_label']}`: {note}"
-            )
+            lines.append(f"- `Fig. {placement['number']}` -> `{placement['target_label']}`")
         lines.append("")
 
     if table_placements:
@@ -597,11 +595,21 @@ def build_section_8_index(placements, leftovers, table_placements, table_notes: 
         lines.append("")
 
     if leftovers:
-        lines.extend(["### Additional figure notes", ""])
-        for figure in leftovers:
-            note = figure.get("note") or "Korean figure explanation required."
-            lines.append(f"- `Fig. {figure['number']}`: {note}")
-        lines.append("")
+        if asset_dir_name:
+            lines.extend(["### Additional figures", ""])
+            for figure in leftovers:
+                rel_path = (Path(asset_dir_name) / figure["filename"]).as_posix()
+                lines.append(f"**Figure {figure['number']}**")
+                lines.append("")
+                lines.append(f"![Figure {figure['number']}]({rel_path})")
+                lines.append("")
+                lines.append(figure.get("note") or "Korean figure explanation required.")
+                lines.append("")
+        else:
+            lines.extend(["### Additional figure index", ""])
+            for figure in leftovers:
+                lines.append(f"- `Fig. {figure['number']}`")
+            lines.append("")
 
     if table_notes:
         lines.append(table_notes.strip())
@@ -611,16 +619,64 @@ def build_section_8_index(placements, leftovers, table_placements, table_notes: 
     return "\n".join(lines).rstrip() + "\n"
 
 
-def replace_section_8_with_index(content: str, placements, leftovers, table_placements, table_notes: str) -> str:
-    new_section = build_section_8_index(placements, leftovers, table_placements, table_notes)
+def replace_section_8_with_index(
+    content: str,
+    placements,
+    leftovers,
+    table_placements,
+    table_notes: str,
+    asset_dir_name: str | None = None,
+) -> str:
+    new_section = build_section_8_index(placements, leftovers, table_placements, table_notes, asset_dir_name)
     parts = extract_section_8_parts(content)
     if not parts:
         return content.rstrip() + "\n\n" + new_section
 
     section_start, section_end, _, existing_table_notes, _ = parts
     effective_table_notes = table_notes or existing_table_notes
-    rebuilt = build_section_8_index(placements, leftovers, table_placements, effective_table_notes)
+    rebuilt = build_section_8_index(
+        placements, leftovers, table_placements, effective_table_notes, asset_dir_name
+    )
     return content[:section_start] + rebuilt + content[section_end:].lstrip("\n")
+
+
+def validate_inline_figure_explanations(content: str, figures):
+    errors = []
+    if re.search(r"^### Figure placement\s*$", content, re.MULTILINE):
+        errors.append("Section 8 must not contain a verbose 'Figure placement' explanation list.")
+
+    for figure in figures:
+        number = figure["number"]
+        image_match = re.search(rf"!\[Figure\s+{number}\]\([^)]+\)", content)
+        if not image_match:
+            errors.append(f"Figure {number} image is not embedded in the final report.")
+            continue
+
+        after_image = content[image_match.end():]
+        note_lines = []
+        for raw_line in after_image.splitlines():
+            line = raw_line.strip()
+            if not line:
+                if note_lines:
+                    break
+                continue
+            if (
+                line.startswith("#")
+                or line.startswith("![")
+                or line.startswith("**Figure ")
+                or line.startswith("<!--")
+            ):
+                break
+            note_lines.append(line)
+
+        note = " ".join(note_lines).strip()
+        if not note:
+            errors.append(f"Figure {number} is missing an explanation immediately below the image.")
+        elif not HANGUL_RE.search(note):
+            errors.append(f"Figure {number} explanation immediately below the image is not Korean.")
+
+    if errors:
+        raise ValueError("Inline figure placement validation failed before saving:\n- " + "\n- ".join(errors))
 
 
 def replace_section_8(content: str, gallery_block: str, table_notes: str) -> str:
@@ -822,8 +878,12 @@ def main():
 
     if source_path and source_path.lower().endswith(".pdf"):
         asset_dir = SUMMARY_DIR / slug
-        figures = extract_figures(source_path, str(asset_dir))
-        tables = extract_tables(source_path)
+        figures, tables = load_or_extract_pdf_assets(
+            source_path,
+            str(asset_dir),
+            extract_figures,
+            extract_tables,
+        )
         table_placements = []
         if tables:
             content, table_placements = inject_tables_into_sections(content, tables, table_notes_map)
@@ -833,8 +893,14 @@ def main():
                 content, asset_dir.name, figures, figure_notes
             )
             content = replace_section_8_with_index(
-                content, placements, leftovers, table_placements, existing_table_notes
+                content,
+                placements,
+                leftovers,
+                table_placements,
+                existing_table_notes,
+                asset_dir.name,
             )
+            validate_inline_figure_explanations(content, figures)
         elif tables:
             content = replace_section_8_with_index(
                 content, [], [], table_placements, existing_table_notes

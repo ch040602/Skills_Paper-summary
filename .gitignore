@@ -2,7 +2,12 @@ __pycache__/
 *.py[cod]
 
 .pytest_cache/
+.codex/
 
 downloaded/
 summary/
 temp_summary.md
+
+# Runtime-generated paper assets belong in the configured summary/download dirs.
+*/figure_*.png
+*/.paper_summary_assets.json

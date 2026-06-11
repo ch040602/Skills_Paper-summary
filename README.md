@@ -130,10 +130,16 @@ The skill instructions in [`SKILL.md`](./SKILL.md) tell the runtime to resolve t
 During execution, the helper scripts usually create:
 
 - downloaded source files under the configured download directory
+- fetch/extract/normalize provenance manifests next to downloaded text/source files
 - a final Markdown note under the configured Obsidian summary directory
 - an asset folder named after the paper slug beside that note when PDF figures are extracted
+- a `.paper_summary_assets.json` manifest inside that asset folder, used to reuse extracted figures and tables when the same PDF is saved again
 
 Because the note and asset folder are siblings, the generated image links remain relative and portable across machines as long as the vault structure stays the same.
+
+Source fetching and text extraction are cached with local manifest files. A repeated `fetch_paper.py` call for the same URL reuses the previously downloaded file when its recorded hash still matches. `extract_text.py` and `normalize_text.py` likewise skip unchanged work based on source/output signatures.
+
+PDF figure and table extraction is cached by source file path, size, modification time, content hash, and extractor cache version. If the PDF changes, the cache manifest is incomplete, or a cached figure image is missing, the helper scripts regenerate the figure/table assets and refresh the manifest.
 
 ## Repository Layout
 
@@ -145,6 +151,7 @@ Important files:
 - [`scripts/fetch_paper.py`](./scripts/fetch_paper.py): downloads the source page or PDF
 - [`scripts/extract_text.py`](./scripts/extract_text.py): extracts text from downloaded HTML or PDF
 - [`scripts/normalize_text.py`](./scripts/normalize_text.py): cleans extracted text
+- [`scripts/context_router.py`](./scripts/context_router.py): builds a role-scoped context manifest so paper-analysis subagents do not all receive the full paper text
 - [`scripts/extract_figures.py`](./scripts/extract_figures.py): extracts PDF figures
 - [`scripts/save_summary.py`](./scripts/save_summary.py): writes the final Markdown summary and embeds figures when available
 

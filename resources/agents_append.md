@@ -11,6 +11,6 @@ Behavior requirements:
 - When a PDF is available, extract embedded figures into `<summary_dir>/<slugified_title>/` and embed them in the Markdown report with relative links.
 - If full text is unavailable, say so clearly in the report.
 - Do not wait for the user to provide an extra prompt if the paper input is already sufficient.
-- Use the latest available frontier model for subagents by default, preferably `gpt-5.4`, and use `high` or `xhigh` reasoning effort for deep paper analysis unless the user asks for speed over depth.
+- Use the current parent/session model family and reasoning profile for paper-analysis subagents by default. Prefer inherited model settings over explicit model or reasoning-effort overrides unless the user explicitly asks for a faster, cheaper, or different option.
 - Default to a comprehensive report. Cover evaluation targets, metric definitions, evaluation protocol, major figures/tables, and important appendix evidence when the source text is available.
 - Figure descriptions in the final report must be Korean explanations of what the figure shows and why it matters, not raw English captions.
